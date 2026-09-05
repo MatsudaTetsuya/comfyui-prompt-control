@@ -77,6 +77,7 @@ def anima_forward_wrapper(executor: WrapperExecutor, *args, **kwargs):
     pc = transformer_options.get("pc_couple")
     if pc and "processed_conds" not in pc:
         pc["processed_conds"] = transformer_options["pc_process_conds"](pc["conds"])
+        pc["mask"] = pc["mask"].to(x.device)
     patch_spatial = anima_model.patch_spatial
 
     activations_shape = list(x.shape)

@@ -10,6 +10,7 @@ from typing import Any
 import torch
 import torch.nn.functional as F
 from comfy.hooks import EnumHookScope, HookGroup, TransformerOptionsHook, set_hooks_for_conditioning
+from comfy.model_base import Anima
 from comfy.model_patcher import ModelPatcher
 
 log = logging.getLogger("comfyui-prompt-control")
@@ -63,13 +64,11 @@ class AttentionCoupleHook(TransformerOptionsHook):
     def __init__(self):
         super().__init__(hook_scope=EnumHookScope.HookedOnly)
 
-        self.transformers_dict: dict[str, Any] = {
-            "patches": {
-                "attn2_output_patch": [Proxy(self.attn2_output_patch)],
-                "attn2_patch": [Proxy(self.attn2_patch)],
-            },
-            "pc_couple": {},
+        self.attn2_patches = {
+            "attn2_output_patch": [Proxy(self.attn2_output_patch)],
+            "attn2_patch": [Proxy(self.attn2_patch)],
         }
+        self.transformers_dict: dict[str, Any] = {"pc_couple": {}}
 
         self.has_negpip = False
         # The list will be calculated later. All clones must refer to the same kv dict
@@ -124,6 +123,7 @@ class AttentionCoupleHook(TransformerOptionsHook):
             "num_conds": self.num_conds,
             "mask": self.mask,
         }
+        self.transformers_dict["patches"] = {} if isinstance(model.model, Anima) else self.attn2_patches
         if self.kv["k"] is None:
             self.has_negpip = model.model_options.get("ppm_negpip", False)
             log.debug("AttentionCouple has_negpip=%s", self.has_negpip)
