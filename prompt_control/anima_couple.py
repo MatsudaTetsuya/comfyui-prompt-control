@@ -97,12 +97,11 @@ def cosmos_attention_forward_couple(_forward: Callable, x, context, rope_emb, tr
     if "pc_couple" not in transformer_options:
         return _forward(x, context, rope_emb, transformer_options)
     c: torch.Tensor = context
-    # FIXME: base cond weight
-    # c = args["processed_conds"][0]
 
     args = transformer_options["pc_couple"]
 
     mask = args["mask"]
+    base_strength = args["base_strength"]
     conds = args["processed_conds"][1:]
     num_conds = len(conds) + 1
     num_tokens_c: list[int] = [cond.shape[1] for cond in conds]
@@ -120,7 +119,7 @@ def cosmos_attention_forward_couple(_forward: Callable, x, context, rope_emb, tr
 
     xs, cs = [], []
     for i in range(num_chunks):
-        c_target = c_chunks[i].repeat(1, lcm_tokens_c // c.shape[1], 1)
+        c_target = c_chunks[i].repeat(1, lcm_tokens_c // c.shape[1], 1) * base_strength
         xs.append(x_chunks[i].repeat(num_conds, 1, 1))
         cs.append(torch.cat([c_target, conds_c_tensor], dim=0))
 

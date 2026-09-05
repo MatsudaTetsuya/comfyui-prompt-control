@@ -122,6 +122,7 @@ class AttentionCoupleHook(TransformerOptionsHook):
             "conds": self.comfy_conds,
             "num_conds": self.num_conds,
             "mask": self.mask,
+            "base_strength": self.base_strength,
         }
         self.transformers_dict["patches"] = {} if isinstance(model.model, Anima) else self.attn2_patches
         if self.kv["k"] is None:
