@@ -1,5 +1,4 @@
 # Adapted from https://github.com/pamparamm/ComfyUI-ppm
-import itertools
 from collections.abc import Callable
 from functools import partial
 from math import lcm
@@ -11,9 +10,6 @@ from comfy.ldm.cosmos.predict2 import Attention as CosmosAttention
 from comfy.patcher_extension import WrapperExecutor
 from comfy.sampler_helpers import convert_cond
 from comfy.samplers import process_conds
-
-COND = 0
-UNCOND = 1
 
 
 def reshape_mask(mask: torch.Tensor, size: tuple[int, int], bs: int, num_tokens: int) -> torch.Tensor:
@@ -109,11 +105,9 @@ def cosmos_attention_forward_couple(_forward: Callable, x, context, rope_emb, tr
     mask = args["mask"]
     conds = args["processed_conds"][1:]
     num_conds = len(conds) + 1
-    num_tokens_c: list[int] = [c.shape[1] for c in conds]
-    cond_or_uncond = transformer_options["cond_or_uncond"]
-    cond_or_uncond_couple = []
+    num_tokens_c: list[int] = [cond.shape[1] for cond in conds]
 
-    num_chunks = len(cond_or_uncond)
+    num_chunks = len(transformer_options["cond_or_uncond"])
     bs = x.shape[0] // num_chunks
 
     x_chunks = x.chunk(num_chunks, dim=0)
@@ -125,44 +119,20 @@ def cosmos_attention_forward_couple(_forward: Callable, x, context, rope_emb, tr
     )
 
     xs, cs = [], []
-    for i, cond_type in enumerate(cond_or_uncond):
-        x_target = x_chunks[i]
+    for i in range(num_chunks):
         c_target = c_chunks[i].repeat(1, lcm_tokens_c // c.shape[1], 1)
-        if cond_type == UNCOND:
-            xs.append(x_target)
-            cs.append(c_target)
-            cond_or_uncond_couple.append(UNCOND)
-        else:
-            xs.append(x_target.repeat(num_conds, 1, 1))
-            cs.append(torch.cat([c_target, conds_c_tensor], dim=0))
-            cond_or_uncond_couple.extend(itertools.repeat(COND, num_conds))
+        xs.append(x_chunks[i].repeat(num_conds, 1, 1))
+        cs.append(torch.cat([c_target, conds_c_tensor], dim=0))
 
-    xs = torch.cat(xs, dim=0)
-    cs = torch.cat(cs, dim=0)
-
-    out = _forward(xs, cs, rope_emb, transformer_options)
+    out = _forward(torch.cat(xs, dim=0), torch.cat(cs, dim=0), rope_emb, transformer_options)
 
     size = tuple(transformer_options["activations_shape"][-2:])
-    num_tokens = out.shape[1]
-    mask_downsample = reshape_mask(mask, size, bs, num_tokens)
+    mask_downsample = reshape_mask(mask, size, bs, out.shape[1])
 
+    rows = num_conds * bs
     outputs = []
-    cond_outputs = []
-    i_cond = 0
-
-    for i, cond_type in enumerate(cond_or_uncond_couple):
-        pos, next_pos = i * bs, (i + 1) * bs
-
-        if cond_type == UNCOND:
-            outputs.append(out[pos:next_pos])
-        else:
-            pos_cond, next_pos_cond = i_cond * bs, (i_cond + 1) * bs
-            masked_output = out[pos:next_pos] * mask_downsample[pos_cond:next_pos_cond]
-            cond_outputs.append(masked_output)
-            i_cond += 1
-
-    if len(cond_outputs) > 0:
-        cond_output = torch.stack(cond_outputs).sum(0)
-        outputs.append(cond_output)
+    for i in range(num_chunks):
+        chunk = out[i * rows : (i + 1) * rows] * mask_downsample
+        outputs.append(chunk.view(num_conds, bs, *chunk.shape[1:]).sum(0))
 
     return torch.cat(outputs, dim=0)
